@@ -1,8 +1,4 @@
-Here's the README content. Switch to Agent mode when you're ready for me to write it to disk.
-
----
-
-# Template Match
+# Crop Query 
 
 A FiftyOne panel plugin for finding images in a large unlabeled dataset that contain a specific object — using only a few cropped reference images and a pretrained vision model.
 

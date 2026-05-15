@@ -8,7 +8,7 @@ No training. No fine-tuning. No GPU required.
 
 ## What it does
 
-You have thousands of unlabeled images and a handful of cropped examples of an object you care about (say, a bird's nest, a defect on a product, a vehicle type). Template Match finds which images in your dataset likely contain that object and marks where in each image it appears.
+You have thousands of unlabeled images and a handful of cropped examples of an object you care about (say, a bird's nest, a defect on a product, a vehicle type). Crop Query finds which images in your dataset likely contain that object and marks where in each image it appears.
 
 The output is:
 
@@ -50,7 +50,7 @@ Tips:
 
 ### 2. Open the panel
 
-Open your dataset in FiftyOne and launch the **Template Match** panel from the panel menu. It appears in the grid view.
+Open your dataset in FiftyOne and launch the **Crop Query** panel from the panel menu. It appears in the grid view.
 
 ### 3. Load your templates
 
@@ -100,7 +100,7 @@ Running on a filtered view first is a good way to test your settings on a small 
 
 ### 8. Run
 
-Click **Run Template Match**. Progress is tracked in the FiftyOne Runs panel. When complete, the dataset reloads automatically and the new fields appear in the sidebar.
+Click **Run Crop Query**. Progress is tracked in the FiftyOne Runs panel. When complete, the dataset reloads automatically and the new fields appear in the sidebar.
 
 ---
 

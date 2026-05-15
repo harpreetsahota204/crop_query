@@ -155,9 +155,12 @@ def _embed_match_one(
     else:
         display_grid = np.zeros((grid_rows, grid_cols), dtype=np.float32)
 
-    heatmap = cv2.resize(
-        display_grid, (W, H), interpolation=cv2.INTER_LINEAR
-    )
+    # Upscale to quarter-image resolution with bilinear interpolation so the
+    # heatmap looks smooth without storing a full-resolution buffer (which
+    # triggers the detached-ArrayBuffer bug in FiftyOne's looker worker).
+    out_w = max(grid_cols * 4, min(W // 4, 512))
+    out_h = max(grid_rows * 4, min(H // 4, 512))
+    heatmap = cv2.resize(display_grid, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
     return {"heatmap": heatmap, "score": raw_score}
 
 

@@ -6,6 +6,14 @@ No training. No fine-tuning. No GPU required.
 
 ---
 
+## Installation
+
+To install the plugin, open your terminal and run:
+
+```
+fiftyone plugins download https://github.com/harpreetsahota204/crop_query
+```
+
 ## What it does
 
 You have thousands of unlabeled images and a handful of cropped examples of an object you care about (say, a bird's nest, a defect on a product, a vehicle type). Crop Query finds which images in your dataset likely contain that object and marks where in each image it appears.

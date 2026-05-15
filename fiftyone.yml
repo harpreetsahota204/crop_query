@@ -1,0 +1,11 @@
+name: "@harpreetsahota/cropquery"
+type: plugin
+version: "1.0.0"
+description: "FiftyOne panel plugin for zero-shot object triage — finds and localizes target objects in large unlabeled image datasets using patch-level embedding similarity against a handful of reference crops."
+fiftyone:
+  version: ">=0.22"
+js_bundle: dist/index.umd.js
+operators:
+  - run_crop_query
+panels:
+  - crop_query_panel

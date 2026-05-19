@@ -410,6 +410,7 @@ class RunCropQuery(foo.Operator):
             execute_as_generator=True,
             allow_immediate_execution=True,
             allow_delegated_execution=True,
+            unlisted=True,
         )
 
     def resolve_input(self, ctx):

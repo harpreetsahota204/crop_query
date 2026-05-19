@@ -4,8 +4,8 @@ Runs a sliding-window patch embedding approach using any FiftyOne zoo model:
 - Extracts overlapping patches from each sample image
 - Embeds patches and template images with the selected zoo model
 - Computes cosine similarity between each patch and every template
-- Produces a per-sample heatmap (spatially normalized for display) and a
-  per-sample score (raw max cosine similarity, for filtering/tagging)
+- Produces a per-sample sparse heatmap (patches below the threshold are zero)
+  and a per-sample score (raw max cosine similarity, for filtering/tagging)
 """
 
 import fiftyone as fo
@@ -33,9 +33,12 @@ if _PERSIST_KEY not in sys.modules:
     _persist = _types.ModuleType(_PERSIST_KEY)
     _persist.model = None
     _persist.model_name = None
+    _persist.cancel_requested = False
     sys.modules[_PERSIST_KEY] = _persist
 else:
     _persist = sys.modules[_PERSIST_KEY]
+    if not hasattr(_persist, "cancel_requested"):
+        _persist.cancel_requested = False
 
 
 def _get_model(model_name: str):
@@ -190,8 +193,16 @@ class CropQueryPanel(foo.Panel):
         )
 
     def render(self, ctx):
+        panel = types.Object()
+        panel.btn(
+            "cancel_run_btn",
+            label="Cancel Run",
+            icon="close",
+            on_click=self.cancel_run,
+            variant="outlined",
+        )
         return types.Property(
-            types.Object(),
+            panel,
             view=types.View(
                 component="CropQueryPanel",
                 composite_view=True,
@@ -199,6 +210,7 @@ class CropQueryPanel(foo.Panel):
                 browse_directory=self.browse_directory,
                 load_model=self.load_model,
                 upload_templates=self.upload_templates,
+                cancel_run=self.cancel_run,
             ),
         )
 
@@ -390,6 +402,16 @@ class CropQueryPanel(foo.Panel):
             "upload_dir": UPLOAD_DIR,
         }
 
+    def cancel_run(self, ctx):
+        """Signal the running operator to stop after the current sample.
+
+        Sets a flag on the process singleton that RunCropQuery.execute()
+        checks at the top of each loop iteration.
+        """
+        _persist.cancel_requested = True
+        print("[CropQuery] cancel_run called — cancellation flag set")
+        return {"cancelled": True}
+
 
 # ---------------------------------------------------------------------------
 # Operator
@@ -555,7 +577,7 @@ class RunCropQuery(foo.Operator):
         template_embeddings = []
 
         if template_files_param:
-            # Use the explicit list sent from the React panel
+            # Explicit list from the React panel — respects per-image removals.
             candidate_paths = [
                 (os.path.basename(p), p)
                 for p in template_files_param
@@ -566,7 +588,7 @@ class RunCropQuery(foo.Operator):
                 f"path(s) from panel"
             )
         else:
-            # Fallback: scan the directory (operator browser invocation)
+            # Fallback: scan the directory (called without panel params).
             candidate_paths = [
                 (fname, os.path.join(template_dir, fname))
                 for fname in sorted(os.listdir(template_dir))
@@ -612,11 +634,11 @@ class RunCropQuery(foo.Operator):
         )
 
         # ---- collect sample info -----------------------------------------
+        # view.values() issues a single batched query instead of loading
+        # every sample document individually — significantly faster on large views.
         print("[CropQuery] Collecting sample filepaths …")
-        sample_infos = [
-            (sample.id, sample.filepath)
-            for sample in view.iter_samples()
-        ]
+        ids, filepaths = view.values(["id", "filepath"])
+        sample_infos = list(zip(ids, filepaths))
         total = len(sample_infos)
 
         if total == 0:
@@ -647,8 +669,17 @@ class RunCropQuery(foo.Operator):
         )
         print(f"[CropQuery] Processing {total} samples sequentially …")
 
+        # Reset any stale cancellation flag from a previous run
+        _persist.cancel_requested = False
+        cancelled = False
+
         # ---- sequential embedding loop -----------------------------------
         for i, (sid, fpath) in enumerate(sample_infos):
+            if _persist.cancel_requested:
+                print(f"[CropQuery] Cancellation requested — stopping after {i} samples")
+                cancelled = True
+                break
+
             try:
                 result = _embed_match_one(
                     fpath, template_embeddings, model,
@@ -685,11 +716,18 @@ class RunCropQuery(foo.Operator):
                 },
             )
 
-        print("[CropQuery] ══════════════════════════════════════════")
-        print(
-            f"[CropQuery] DONE — {total} processed, {tagged_count} tagged"
-        )
-        print("[CropQuery] ══════════════════════════════════════════")
+        if cancelled:
+            print("[CropQuery] ══════════════════════════════════════════")
+            print(
+                f"[CropQuery] CANCELLED — {i} processed, {tagged_count} tagged"
+            )
+            print("[CropQuery] ══════════════════════════════════════════")
+        else:
+            print("[CropQuery] ══════════════════════════════════════════")
+            print(
+                f"[CropQuery] DONE — {total} processed, {tagged_count} tagged"
+            )
+            print("[CropQuery] ══════════════════════════════════════════")
 
         # ---- create index on score field for fast sorting/filtering ------
         try:
@@ -698,9 +736,11 @@ class RunCropQuery(foo.Operator):
         except Exception as exc:
             print(f"[CropQuery] WARN: could not create index on '{score_field}': {exc}")
 
+        processed_count = i + 1 if cancelled else total
         yield {
             "success": True,
-            "processed": total,
+            "cancelled": cancelled,
+            "processed": processed_count,
             "tagged": tagged_count,
             "tag_name": tag_name,
         }
@@ -726,6 +766,18 @@ class RunCropQuery(foo.Operator):
 
         if "error" in result:
             outputs.str("error", label="Error", default=result["error"])
+        elif result.get("cancelled"):
+            outputs.str(
+                "summary",
+                label="Summary",
+                view=types.MarkdownView(),
+                default=(
+                    f"**Run cancelled**\n\n"
+                    f"- Processed: {result.get('processed', 0)} samples before cancellation\n"
+                    f"- Tagged `{result.get('tag_name', 'potential_match')}`: "
+                    f"{result.get('tagged', 0)} samples\n"
+                ),
+            )
         else:
             outputs.str(
                 "summary",

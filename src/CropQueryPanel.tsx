@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   usePanelEvent,
   useOperatorExecutor,
@@ -54,8 +54,7 @@ type ModelStatus = "idle" | "loading" | "ready" | "error";
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function CropQueryPanel({ data }: any) {
-  console.debug("[CropQuery] Panel render — data keys:", data ? Object.keys(data) : "none");
+export default function CropQueryPanel() {
 
   // ---- persistent template state (survive panel unmount/remount) --------
   const [templateDir, setTemplateDir]           = usePersistentState<string>("templateDir", "");
@@ -100,6 +99,7 @@ export default function CropQueryPanel({ data }: any) {
   // ---- transient run state (fine to reset) ------------------------------
   const [runComplete, setRunComplete]           = useState(false);
   const [runResult, setRunResult]               = useState<any>(null);
+  const [cancelling, setCancelling]             = useState(false);
 
   // ---- hooks ------------------------------------------------------------
   const handleEvent = usePanelEvent();
@@ -118,23 +118,19 @@ export default function CropQueryPanel({ data }: any) {
       operator: `${PLUGIN_NAME}/${PANEL_NAME}#load_model`,
       params: { model_name: modelName },
       callback: (result: any) => {
-        console.log("[CropQuery] load_model callback raw:", result);
         const p = result?.result;
-        console.log("[CropQuery] load_model callback payload:", p);
 
         if (!p) {
-          console.warn("[CropQuery] load_model: no payload in callback");
           setModelStatus("error");
           setModelError("No response from server");
           return;
         }
         if (p.error) {
-          console.error("[CropQuery] load_model server error:", p.error);
+          console.error("[CropQuery] load_model error:", p.error);
           setModelStatus("error");
           setModelError(p.error);
           return;
         }
-        console.log("[CropQuery] Model ready:", p.model_name);
         setModelStatus("ready");
         setLoadedModelName(p.model_name ?? modelName);
       },
@@ -154,10 +150,7 @@ export default function CropQueryPanel({ data }: any) {
         operator: `${PLUGIN_NAME}/${PANEL_NAME}#browse_directory`,
         params: { path: path || "~" },
         callback: (result: any) => {
-          console.log("[CropQuery] browse_directory callback raw:", result);
           const p = result?.result;
-          console.log("[CropQuery] browse_directory payload:", p);
-
           if (!p) {
             setBrowseError("No response from server");
             return;
@@ -172,33 +165,17 @@ export default function CropQueryPanel({ data }: any) {
           setBrowseParent(p.parent || "");
           setBrowseImageCount(p.image_count || 0);
           setTemplateDir(p.path || "");
-          console.log(
-            "[CropQuery] browse_directory: path=",
-            p.path,
-            "entries=",
-            (p.entries || []).length,
-            "images=",
-            p.image_count
-          );
         },
       });
     },
     [handleEvent]
   );
 
-  // ---------------------------------------------------------------------------
-  // Shared list_templates callback — declared before openBrowser/selectBrowseDir
-  // because both reference it in their useCallback dependency arrays, and const
-  // declarations must be initialized before their deps arrays are evaluated.
-  // ---------------------------------------------------------------------------
-
+  // Shared result handler for list_templates and upload_templates callbacks.
+  // Declared before openBrowser/selectBrowseDir which both reference it.
   const handleTemplateListResult = useCallback((result: any) => {
-    console.log("[CropQuery] list_templates callback raw:", result);
     const payload = result?.result;
-    console.log("[CropQuery] list_templates payload:", payload);
-
     if (!payload) {
-      console.warn("[CropQuery] list_templates: no payload");
       setTemplatesError("No response from server");
       return;
     }
@@ -208,12 +185,7 @@ export default function CropQueryPanel({ data }: any) {
       setTemplatesLoaded(true);
       return;
     }
-    const list: TemplateInfo[] = payload.templates || [];
-    console.log(
-      `[CropQuery] list_templates: ${list.length} template(s), ` +
-      `${list.filter((t) => t.thumbnail).length} with thumbnails`
-    );
-    setTemplates(list);
+    setTemplates(payload.templates || []);
     setTemplatesLoaded(true);
   }, []);
 
@@ -233,7 +205,7 @@ export default function CropQueryPanel({ data }: any) {
       return;
     }
 
-    console.log(`[CropQuery] Reading ${imageFiles.length} file(s) for upload`);
+    console.log(`[CropQuery] Uploading ${imageFiles.length} file(s)`);
     setIsUploading(true);
     setUploadError(null);
     setTemplatesError(null);
@@ -257,13 +229,11 @@ export default function CropQueryPanel({ data }: any) {
 
     Promise.all(reads)
       .then((files) => {
-        console.log(`[CropQuery] upload_templates: sending ${files.length} file(s)`);
         handleEvent("upload_templates", {
           operator: `${PLUGIN_NAME}/${PANEL_NAME}#upload_templates`,
           params: { files },
           callback: (result: any) => {
             setIsUploading(false);
-            console.log("[CropQuery] upload_templates callback raw:", result);
             const payload = result?.result;
             if (payload?.upload_dir) {
               setTemplateDir(payload.upload_dir);
@@ -283,13 +253,11 @@ export default function CropQueryPanel({ data }: any) {
   }, [handleEvent, handleTemplateListResult]);
 
   const openBrowser = useCallback(() => {
-    console.log("[CropQuery] openBrowser, starting at:", templateDir || "~");
     setBrowsing(true);
     doBrowse(templateDir || "~");
   }, [templateDir, doBrowse]);
 
   const selectBrowseDir = useCallback(() => {
-    console.log("[CropQuery] selectBrowseDir, dir:", browsePath);
     setTemplateDir(browsePath);
     setBrowsing(false);
     setTemplatesError(null);
@@ -308,7 +276,6 @@ export default function CropQueryPanel({ data }: any) {
   // ---------------------------------------------------------------------------
 
   const loadTemplates = useCallback(() => {
-    console.log("[CropQuery] loadTemplates, dir:", templateDir);
     setTemplatesError(null);
     setTemplatesLoaded(false);
     setTemplates([]);
@@ -325,10 +292,10 @@ export default function CropQueryPanel({ data }: any) {
   // ---------------------------------------------------------------------------
 
   const runMatching = useCallback(async () => {
+    // template_files is the current visible set — respects per-image removals
+    // without touching disk. Falls back to scanning template_dir on the Python side.
     const params = {
       template_dir:       templateDir,
-      // Explicit list of active filepaths — only these are embedded on Run.
-      // Allows individual crops to be removed from the grid without touching disk.
       template_files:     templates.map((t) => t.filepath),
       model_name:         modelName,
       n_cols:             nCols,
@@ -338,24 +305,22 @@ export default function CropQueryPanel({ data }: any) {
       tag_threshold:      tagThreshold,
       heatmap_threshold:  heatmapThreshold,
       tag_name:           tagName,
-      view_target:        target,   // "DATASET" or "CURRENT_VIEW"
+      view_target:        target,
     };
-    console.log("[CropQuery] runMatching, params:", params);
     setRunComplete(false);
     setRunResult(null);
 
     try {
       const result = await executor.execute(params);
-      console.log("[CropQuery] executor.execute finished, result:", result);
       setRunComplete(true);
       setRunResult(result);
     } catch (e: any) {
-      console.error("[CropQuery] executor.execute error:", e);
+      console.error("[CropQuery] run error:", e);
       setRunComplete(true);
       setRunResult({ error: e.message ?? "Unknown error" });
     }
   }, [
-    templateDir, modelName, nCols, nRows, overlapPct,
+    templateDir, templates, modelName, nCols, nRows, overlapPct,
     scoreField, tagThreshold, heatmapThreshold, tagName, target, executor,
   ]);
 
@@ -365,6 +330,29 @@ export default function CropQueryPanel({ data }: any) {
     templates.length > 0 &&
     modelStatus === "ready" &&
     !isRunning;
+
+  // ---------------------------------------------------------------------------
+  // Cancel run
+  // ---------------------------------------------------------------------------
+
+  const cancelRun = useCallback(() => {
+    if (!isRunning || cancelling) return;
+    console.log("[CropQuery] cancelRun called");
+    setCancelling(true);
+
+    handleEvent("cancel_run", {
+      operator: `${PLUGIN_NAME}/${PANEL_NAME}#cancel_run`,
+      params: {},
+      callback: () => {
+        // cancelling badge stays until isRunning goes false
+      },
+    });
+  }, [isRunning, cancelling, handleEvent]);
+
+  // Reset cancelling badge once the run finishes
+  useEffect(() => {
+    if (!isRunning) setCancelling(false);
+  }, [isRunning]);  // isRunning = executor.isExecuting (FiftyOne global state)
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -705,23 +693,42 @@ export default function CropQueryPanel({ data }: any) {
           </div>
         ) : null}
 
-        <button
-          style={{
-            ...S.runBtn,
-            ...(canRun ? {} : S.runBtnDisabled),
-          }}
-          onClick={() => {
-            console.log("[CropQuery] Run button clicked, canRun:", canRun);
-            if (canRun) runMatching();
-          }}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            style={{
+              ...S.runBtn,
+              ...(canRun ? {} : S.runBtnDisabled),
+            }}
+          onClick={runMatching}
           disabled={!canRun}
-        >
-          {isRunning ? "Running…" : "Run CropQuery"}
-        </button>
+          >
+            {isRunning ? "Running…" : "Run CropQuery"}
+          </button>
 
-        {isRunning && (
+          {isRunning && (
+            <button
+              style={{
+                ...S.btnSecondary,
+                opacity: cancelling ? 0.5 : 1,
+                cursor: cancelling ? "default" : "pointer",
+              }}
+              onClick={cancelRun}
+              disabled={cancelling}
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          )}
+        </div>
+
+        {isRunning && !cancelling && (
           <div style={S.statusMsg}>
             Processing — check the Runs panel for live progress.
+          </div>
+        )}
+
+        {isRunning && cancelling && (
+          <div style={S.statusMsg}>
+            Cancellation requested — finishing current sample…
           </div>
         )}
 
@@ -729,6 +736,8 @@ export default function CropQueryPanel({ data }: any) {
           <div style={runResult?.error ? S.error : S.successMsg}>
             {runResult?.error
               ? `Error: ${runResult.error}`
+              : runResult?.cancelled
+              ? "Cancelled — partial results saved. Check the Runs panel for details."
               : "Done — check the Runs panel for details"}
           </div>
         )}

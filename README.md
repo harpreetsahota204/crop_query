@@ -2,6 +2,10 @@
 
 **Few-shot annotation triage for FiftyOne.** Find images containing a specific object in a large unlabeled dataset using only a few example crops. No training, no fine-tuning, no GPU required.
 
+
+<img src="cropquery.gif">
+
+
 ---
 
 ## Installation

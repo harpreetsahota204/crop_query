@@ -1,14 +1,10 @@
-# Crop Query 
+# Crop Query
 
-A FiftyOne panel plugin for finding images in a large unlabeled dataset that contain a specific object — using only a few cropped reference images and a pretrained vision model.
-
-No training. No fine-tuning. No GPU required.
+**Few-shot annotation triage for FiftyOne.** Find images containing a specific object in a large unlabeled dataset using only a few example crops. No training, no fine-tuning, no GPU required.
 
 ---
 
 ## Installation
-
-To install the plugin, open your terminal and run:
 
 ```
 fiftyone plugins download https://github.com/harpreetsahota204/crop_query
@@ -16,12 +12,31 @@ fiftyone plugins download https://github.com/harpreetsahota204/crop_query
 
 ## What it does
 
-You have thousands of unlabeled images and a handful of cropped examples of an object you care about (say, a bird's nest, a defect on a product, a vehicle type). Crop Query finds which images in your dataset likely contain that object and marks where in each image it appears.
+You have thousands of unlabeled images and a handful of cropped examples of an object you care about (a bird's nest, a defect on a product, a vehicle type, a sponsor logo). Crop Query finds which images in your dataset likely contain that object and marks where in each image it appears.
 
 The output is:
 
-- **A ranked annotation queue** — images sorted by how closely they match your reference crops, with a configurable tag applied to the top candidates
-- **Spatial heatmaps** — overlaid on each image in the FiftyOne modal, showing which region matched the templates most strongly
+- **A ranked annotation queue**: images sorted by how closely they match your reference crops, with a configurable tag applied to the top candidates
+
+- **Spatial heatmaps**: overlaid on each image in the FiftyOne modal, showing which region matched the templates most strongly
+
+---
+
+## Use cases
+
+- **Industrial inspection**: defects, anomalies, or specific component types in unlabeled inspection imagery
+
+- **Infrastructure monitoring**: bird's nests on power lines, debris on rail tracks, signs of wear in drone footage
+
+- **Wildlife and ecology**: filtering camera trap frames for a specific species
+
+- **Sports media and broadcast analytics**: sponsor logos, team logos, recurring visual elements across long footage archives
+
+- **Retail and inventory**: locating specific products in shelf imagery
+
+- **Aerial and remote sensing**: aircraft, ships, or vehicle types in satellite or drone scenes
+
+- **Manufacturing QA**: scratches, dents, contamination on parts
 
 ---
 
@@ -29,7 +44,7 @@ The output is:
 
 ### Reference templates
 
-You provide a directory of pre-cropped image examples — the "templates." These are simply image files you've already prepared: crop out one or more instances of the object you're looking for. More templates covering different angles, lighting conditions, or distances will give broader coverage.
+You provide a directory of pre-cropped image examples, the "templates." These are simply image files you've already prepared: crop out one or more instances of the object you're looking for. More templates covering different angles, lighting conditions, or distances will give broader coverage.
 
 ### Embedding-based patch comparison
 
@@ -39,9 +54,11 @@ The comparison works in three steps:
 
 **1. Embed the templates.** Each reference crop is passed through the model once, producing a compact numeric representation of its appearance.
 
-**2. Divide and embed each dataset image.** Each image is cut into a grid of overlapping patches. Every patch is embedded with the same model. Because patches are roughly the same scale as your reference crops, the comparison is fair — you're asking "does this local region look like my template?", not "does this entire image look like my template?"
+**2. Divide and embed each dataset image.** Each image is cut into a grid of overlapping patches. Every patch is embedded with the same model. Because patches are roughly the same scale as your reference crops, the comparison is fair: you're asking "does this local region look like my template?", not "does this entire image look like my template?" Overlap ensures an object that straddles two patch boundaries still falls squarely inside at least one patch.
 
-**3. Compute similarity.** The cosine similarity between each patch and each template is computed. The best-matching patch across all templates determines the image's score. A spatial map of these similarities becomes the heatmap.
+**3. Compute similarity.** The cosine similarity between each patch and each template is computed. The highest similarity found across all patches and all templates becomes the image's **score** — a single float you can sort and filter on. A spatial map of those per-patch similarities becomes the **heatmap**, with patches below a configurable threshold zeroed out so only genuine hits show up.
+
+Samples whose score meets your threshold are **tagged**, giving you an annotation queue in one click.
 
 ---
 
@@ -49,12 +66,12 @@ The comparison works in three steps:
 
 ### 1. Prepare your templates
 
-Crop out examples of the object you're looking for and save them as image files (JPG, PNG, WEBP, TIFF) in a single directory. A few good examples are enough to start — you can always add more.
+Crop out examples of the object you're looking for and save them as image files (JPG, PNG, WEBP, TIFF) in a single directory. A few good examples are enough to start. You can always add more.
 
 Tips:
 - Use crops that represent the range of appearances you expect (different distances, angles, lighting)
-- Crops don't need to be tightly cropped — some background context is fine
-- 3–10 templates is usually enough; beyond that, returns diminish quickly
+- Crops don't need to be tightly cropped; some background context is fine
+- 3 to 10 templates is usually enough; beyond that, returns diminish quickly
 
 ### 2. Open the panel
 
@@ -66,15 +83,11 @@ Enter the path to your template directory (or use the Browse button to navigate 
 
 ### 4. Load a model
 
-Enter a FiftyOne zoo model name and click **Load Model**. The first time you load a model, weights are downloaded and initialized — this can take 30 seconds to several minutes depending on the model and your connection. Subsequent loads in the same session are instant.
+Enter a FiftyOne zoo model name and click **Load Model**. The first time you load a model, weights are downloaded and initialized. This can take 30 seconds to several minutes depending on the model and your connection. Subsequent loads in the same session are instant.
 
 **Recommended starting model:** `clip-vit-base32-torch`
 
-This is CLIP (Contrastive Language-Image Pretraining), a strong general-purpose vision model that understands appearance, texture, and shape. It works well across a wide range of object types without any task-specific tuning.
-
-Other options:
-- `clip-vit-large14-torch` — higher quality, slower
-- `resnet50-imagenet-torch` — faster, more focused on texture/shape
+CLIP (Contrastive Language-Image Pretraining) is a strong general-purpose vision model that understands appearance, texture, and shape. It works well across a wide range of object types without any task-specific tuning.
 
 ### 5. Configure the grid
 
@@ -88,7 +101,7 @@ The grid settings control how each image is divided into patches for comparison:
 
 **Rule of thumb:** set the grid so that one patch roughly covers the area your target object would occupy in a typical image. If the object spans about 1/10th of the image width, use 10 patches per row.
 
-The live estimate below the sliders shows the expected patch count and patch size in pixels — use this to sanity-check your settings before running.
+The live estimate below the sliders shows the expected patch count and patch size in pixels. Use this to sanity-check your settings before running.
 
 ### 6. Configure outputs
 
@@ -101,8 +114,8 @@ The live estimate below the sliders shows the expected patch count and patch siz
 
 ### 7. Choose the target
 
-- **Entire dataset** — processes every sample
-- **Current view** — processes only the samples currently visible in the grid (respects any active filters or saved views)
+- **Entire dataset**: processes every sample
+- **Current view**: processes only the samples currently visible in the grid (respects any active filters or saved views)
 
 Running on a filtered view first is a good way to test your settings on a small subset before committing to the full dataset.
 
@@ -116,7 +129,7 @@ Click **Run Crop Query**. Progress is tracked in the FiftyOne Runs panel. When c
 
 ### Score field (`template_score` by default)
 
-A float between roughly 0 and 1 representing how strongly the best-matching patch in that image resembled any of your templates. This is a raw cosine similarity value — **absolute and comparable across all images in your dataset.**
+A float between roughly 0 and 1 representing how strongly the best-matching patch in that image resembled any of your templates. This is a raw cosine similarity value. **Scores are comparable across all images within a single run using the same templates and model.** Different templates or models produce a new score scale, so don't compare scores across runs.
 
 Use this field to:
 - Sort the dataset by score (descending) to see the strongest matches first
@@ -127,7 +140,7 @@ Use this field to:
 
 A spatial overlay visible in the FiftyOne sample modal. The bright regions are where the model found the strongest similarity to your templates. Dark regions scored below the heatmap cutoff threshold and are shown as transparent.
 
-The heatmap's spatial resolution depends on your grid settings — finer grids produce more localized hot spots. The hot spot is roughly the size of one patch and is centered on the best-matching region.
+The heatmap's spatial resolution depends on your grid settings. Finer grids produce more localized hot spots. The hot spot is roughly the size of one patch and is centered on the best-matching region.
 
 ### Tags
 
@@ -146,7 +159,7 @@ annotation_queue = dataset.match_tags("potential_match")
 
 ### Calibrate the thresholds before tagging the full dataset
 
-Run on a small view (20–50 samples) first. After it completes, sort by `template_score` descending and manually check:
+Run on a small view (20 to 50 samples) first. After it completes, sort by `template_score` descending and manually check:
 - What score do genuine matches get?
 - What score do non-matches get?
 - Is there a clear gap between the two groups?
@@ -156,9 +169,9 @@ Set your **Tag above** threshold at the valley between those two groups, then re
 ### Match patch size to object size
 
 The single most important setting. If your object occupies roughly:
-- 1/5 of the image → use 5–6 patches per row
-- 1/10 of the image → use 10–12 patches per row
-- 1/20 of the image → use 15–20 patches per row
+- 1/5 of the image: use 5 to 6 patches per row
+- 1/10 of the image: use 10 to 12 patches per row
+- 1/20 of the image: use 15 to 20 patches per row
 
 Patches that are too large capture too much background and dilute the similarity. Patches that are too small may not capture enough of the object for a meaningful comparison.
 
@@ -172,7 +185,7 @@ The default heatmap cutoff (0.5) shows any patch above that raw similarity. If t
 
 ### High scores everywhere means the threshold needs calibration
 
-CLIP cosine similarities for natural images cluster in a relatively narrow range — unrelated patches can still score 0.5–0.6. If every image is getting tagged, raise the **Tag above** threshold (try 0.80–0.85) and look at the actual score distribution in the sidebar to find where the real matches separate from the background.
+CLIP cosine similarities for natural images cluster in a relatively narrow range. Unrelated patches can still score 0.5 to 0.6. If every image is getting tagged, raise the **Tag above** threshold (try 0.80 to 0.85) and look at the actual score distribution in the sidebar to find where the real matches separate from the background.
 
 ### Multiple templates beat one perfect template
 
@@ -192,11 +205,40 @@ Embedding-based matching is more compute-intensive than classical pixel matching
 
 For large datasets, use **Delegated Execution** (available via FiftyOne's operator settings) to run the job as a background process without blocking the app.
 
+A GPU is not required but provides a 5 to 20× speedup depending on hardware and model.
+
 ---
 
 ## Limitations
 
-- Produces heatmaps and scores, not bounding boxes — a human annotator still draws the boxes
-- Spatial resolution of the heatmap is limited by patch size; very small objects require fine grids and longer runtimes
-- Similarity scores are relative to the provided templates — a low score means "not like your crops," not "object absent"
-- GPU is not required but significantly speeds up embedding (5–20× depending on hardware and model)
+- Produces heatmaps and scores, not bounding boxes. A human annotator still draws the boxes.
+- Spatial resolution of the heatmap is limited by patch size. Very small objects require fine grids and longer runtimes.
+- Similarity scores are relative to the provided templates. A low score means "not like your crops," not "object absent."
+
+---
+
+## When to reach for something else
+
+Crop Query is a triage and discovery tool, not a detector. If you need:
+
+- **Tight bounding boxes** rather than heatmaps: use an open-vocabulary detector like OWLv2 or Grounding DINO with image prompts
+- **Precise instance counting**: use a few-shot counting model
+- **Production inference on GPU at scale**: train a dedicated detector after using Crop Query to source the initial annotation set
+
+---
+
+## Related concepts
+
+Crop Query implements a workflow that goes by several names in the literature:
+
+- **Few-Shot Object Localization (FSOL)** ([arxiv 2403.12466](https://arxiv.org/abs/2403.12466)): using a small number of labeled exemplars to find positional information about matching objects in unlabeled images
+
+- **Image-conditioned / visual prompt detection**: using images as detection queries instead of text (related: MQ-Det, OWLv2 image-conditioned mode, Visual Textualization)
+
+- **Query by example / reference-based retrieval**: finding images similar to a small reference set
+
+- **Embedding-based sample selection**: a common pre-annotation pattern in data-centric ML pipelines
+
+- **Similarity-based annotation**: extrapolating labels from a small annotated set to unannotated regions using embedding-space proximity (related: SAFE framework in medical CV)
+
+What's distinctive about Crop Query is the packaging: a single FiftyOne panel with template directory input, sliders that map to object scale, threshold calibration, and a heatmap output, runnable on a laptop CPU.

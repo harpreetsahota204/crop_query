@@ -69,6 +69,11 @@ export default function CropQueryPanel() {
   const [isUploading, setIsUploading]           = useState(false);
   const [uploadError, setUploadError]           = useState<string | null>(null);
 
+  // ---- transient URL-add state -------------------------------------------
+  const [templateUrl, setTemplateUrl]           = useState("");
+  const [isUrlLoading, setIsUrlLoading]         = useState(false);
+  const [urlError, setUrlError]                 = useState<string | null>(null);
+
   // ---- transient browse state -------------------------------------------
   const [browsing, setBrowsing]                 = useState(false);
   const [browseEntries, setBrowseEntries]       = useState<BrowseEntry[]>([]);
@@ -251,6 +256,43 @@ export default function CropQueryPanel() {
         console.error("[CropQuery] FileReader error:", err);
       });
   }, [handleEvent, handleTemplateListResult]);
+
+  // ---------------------------------------------------------------------------
+  // Add template from URL
+  // ---------------------------------------------------------------------------
+
+  const loadTemplateFromUrl = useCallback(() => {
+    const url = templateUrl.trim();
+    if (!url) return;
+
+    console.log("[CropQuery] loadTemplateFromUrl called, url:", url);
+    setIsUrlLoading(true);
+    setUrlError(null);
+
+    handleEvent("load_template_from_url", {
+      operator: `${PLUGIN_NAME}/${PANEL_NAME}#load_template_from_url`,
+      params: { url },
+      callback: (result: any) => {
+        setIsUrlLoading(false);
+        const payload = result?.result;
+        if (!payload) {
+          setUrlError("No response from server");
+          return;
+        }
+        if (payload.error) {
+          console.error("[CropQuery] load_template_from_url error:", payload.error);
+          setUrlError(payload.error);
+          return;
+        }
+        if (payload.upload_dir) {
+          setTemplateDir(payload.upload_dir);
+        }
+        setTemplates([...templates, ...(payload.templates || [])]);
+        setTemplatesLoaded(true);
+        setTemplateUrl("");
+      },
+    });
+  }, [templateUrl, templates, handleEvent, setTemplateDir, setTemplates, setTemplatesLoaded]);
 
   const openBrowser = useCallback(() => {
     setBrowsing(true);
@@ -454,6 +496,40 @@ export default function CropQueryPanel() {
         </div>
 
         {uploadError && <div style={S.error}>{uploadError}</div>}
+
+        <div style={S.orDivider}>
+          <div style={S.orDividerLine} />
+          <span style={S.orText}>or</span>
+          <div style={S.orDividerLine} />
+        </div>
+
+        <div style={S.row}>
+          <input
+            style={S.input}
+            type="text"
+            placeholder="Paste an image URL"
+            value={templateUrl}
+            onChange={(e) => {
+              setTemplateUrl(e.target.value);
+              setUrlError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") loadTemplateFromUrl();
+            }}
+          />
+          <button
+            style={{
+              ...S.btnAccent,
+              ...(isUrlLoading ? S.btnDisabledStyle : {}),
+            }}
+            onClick={loadTemplateFromUrl}
+            disabled={isUrlLoading || !templateUrl.trim()}
+          >
+            {isUrlLoading ? "Adding…" : "Add"}
+          </button>
+        </div>
+
+        {urlError && <div style={S.error}>{urlError}</div>}
         </>
         )}
 

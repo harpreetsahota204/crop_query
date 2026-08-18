@@ -210,6 +210,7 @@ class CropQueryPanel(foo.Panel):
                 browse_directory=self.browse_directory,
                 load_model=self.load_model,
                 upload_templates=self.upload_templates,
+                load_template_from_url=self.load_template_from_url,
                 cancel_run=self.cancel_run,
             ),
         )
@@ -401,6 +402,76 @@ class CropQueryPanel(foo.Panel):
             "count": len(templates),
             "upload_dir": UPLOAD_DIR,
         }
+
+    def load_template_from_url(self, ctx):
+        """Download a single image from a URL, save it to UPLOAD_DIR, and
+        return a thumbnail entry in the same format as list_templates and
+        upload_templates.
+
+        Unlike upload_templates, this does NOT clear UPLOAD_DIR — each
+        successful call adds one more file so it composes with images
+        already added via directory load / drag-and-drop.
+
+        Expects ctx.params["url"]. Returns {"templates": [entry], "count": 1,
+        "upload_dir": UPLOAD_DIR} or {"error": "..."}.
+        """
+        import urllib.request
+        import urllib.parse
+        import cv2
+        import numpy as np
+
+        url = (ctx.params.get("url") or "").strip()
+        print(f"[CropQuery] load_template_from_url called, url='{url}'")
+
+        if not url:
+            return {"error": "No URL provided"}
+
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return {"error": "URL must start with http:// or https://"}
+
+        max_bytes = 20 * 1024 * 1024  # 20 MB cap
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read(max_bytes + 1)
+        except Exception as exc:
+            print(f"[CropQuery] URL download failed: {exc}")
+            return {"error": f"Could not download URL: {exc}"}
+
+        if not data:
+            return {"error": "Downloaded file is empty"}
+        if len(data) > max_bytes:
+            return {"error": "Image exceeds 20MB size limit"}
+
+        img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return {"error": "URL did not point to a valid image"}
+
+        # ---- derive a unique filename ----
+        parsed = urllib.parse.urlparse(url)
+        base = os.path.basename(parsed.path) or "url_image"
+        name, ext = os.path.splitext(base)
+        name = name or "url_image"
+        if ext.lower() not in IMAGE_EXTENSIONS:
+            ext = ".jpg"
+
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        fname = f"{name}{ext}"
+        fpath = os.path.join(UPLOAD_DIR, fname)
+        counter = 1
+        while os.path.exists(fpath):
+            fname = f"{name}_{counter}{ext}"
+            fpath = os.path.join(UPLOAD_DIR, fname)
+            counter += 1
+
+        cv2.imwrite(fpath, img)
+
+        entry = {"filename": fname, "filepath": fpath}
+        entry.update(self._make_thumbnail(img, fname))
+
+        print(f"[CropQuery] Saved URL template: {fname} -> {fpath}")
+        return {"templates": [entry], "count": 1, "upload_dir": UPLOAD_DIR}
 
     def cancel_run(self, ctx):
         """Signal the running operator to stop after the current sample.
